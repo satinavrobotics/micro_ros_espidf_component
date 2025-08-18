@@ -10,8 +10,28 @@ else
 	BUILD_TYPE = Release
 endif
 
+# Allow passing includes via file (avoids broken quoting)
+ifneq ($(strip $(IDF_INCLUDES_FILE)),)
+IDF_INCLUDES := $(shell cat $(IDF_INCLUDES_FILE))
+endif
+
 CFLAGS_INTERNAL := $(X_CFLAGS) -ffunction-sections -fdata-sections
 CXXFLAGS_INTERNAL := $(X_CXXFLAGS) -ffunction-sections -fdata-sections
+
+# --- macOS/arm64 host colcon settings (fixes libc++/ABI link errors) ---
+ifeq ($(shell uname),Darwin)
+COLCON_HOST_ARGS := --merge-install \
+  --cmake-args -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF \
+               -DCMAKE_OSX_ARCHITECTURES=arm64 \
+               -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+               -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+               -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
+               -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++" \
+               -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
+else
+COLCON_HOST_ARGS := --merge-install --cmake-args -DBUILD_TESTING=OFF
+endif
+# ----------------------------------------------------------------------
 
 all: $(EXTENSIONS_DIR)/libmicroros.a
 
@@ -43,7 +63,8 @@ $(EXTENSIONS_DIR)/micro_ros_dev/install:
 	git clone -b humble https://github.com/ament/googletest src/googletest; \
 	git clone -b humble https://github.com/ros2/ament_cmake_ros src/ament_cmake_ros; \
 	git clone -b humble https://github.com/ament/ament_index src/ament_index; \
-	colcon build --cmake-args -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=gcc;
+	touch src/ament_index/ament_index_cpp/COLCON_IGNORE; \
+	CC=clang CXX=clang++ colcon build $(COLCON_HOST_ARGS) --packages-skip ament_index_cpp;
 
 $(EXTENSIONS_DIR)/micro_ros_src/src:
 	rm -rf micro_ros_src; \
@@ -68,11 +89,16 @@ $(EXTENSIONS_DIR)/micro_ros_src/src:
 	git clone -b humble https://github.com/ros2/rosidl_defaults src/rosidl_defaults; \
 	git clone -b humble https://github.com/ros2/unique_identifier_msgs src/unique_identifier_msgs; \
 	git clone -b humble https://github.com/ros2/common_interfaces src/common_interfaces; \
-	git clone -b galactic https://github.com/ros2/example_interfaces src/example_interfaces; \
+	git clone -b humble https://github.com/ros2/example_interfaces src/example_interfaces; \
 	git clone -b humble https://github.com/ros2/test_interface_files src/test_interface_files; \
 	git clone -b humble https://github.com/ros2/rmw_implementation src/rmw_implementation; \
 	git clone -b humble https://github.com/ros2/rcl_logging src/rcl_logging; \
 	git clone -b humble https://gitlab.com/ros-tracing/ros2_tracing src/ros2_tracing; \
+	touch src/ros2_tracing/tracetools_read/COLCON_IGNORE; \
+	touch src/ros2_tracing/tracetools_trace/COLCON_IGNORE; \
+	touch src/ros2_tracing/tracetools_launch/COLCON_IGNORE; \
+	touch src/ros2_tracing/tracetools_test/COLCON_IGNORE; \
+	touch src/ros2_tracing/ros2trace/COLCON_IGNORE; \
 	git clone -b humble https://github.com/micro-ROS/micro_ros_utilities src/micro_ros_utilities; \
     touch src/rosidl/rosidl_typesupport_introspection_cpp/COLCON_IGNORE; \
     touch src/rcl_logging/rcl_logging_log4cxx/COLCON_IGNORE; \
@@ -86,24 +112,38 @@ $(EXTENSIONS_DIR)/micro_ros_src/src:
 $(EXTENSIONS_DIR)/micro_ros_src/install: $(EXTENSIONS_DIR)/esp32_toolchain.cmake $(EXTENSIONS_DIR)/micro_ros_dev/install $(EXTENSIONS_DIR)/micro_ros_src/src
 	cd $(UROS_DIR); \
 	unset AMENT_PREFIX_PATH; \
+	unset ROS_DISTRO; \
+	unset ROS_VERSION; \
+	export CMAKE_BUILD_PARALLEL_LEVEL=1; \
+	export COLCON_DEFAULTS_FILE=/dev/null; \
 	PATH="$(subst /opt/ros/$(ROS_DISTRO)/bin,,$(PATH))"; \
 	. ../micro_ros_dev/install/local_setup.sh; \
+	unset CC; unset CXX; \
 	colcon build \
+		--executor sequential \
+		--parallel-workers 1 \
+		--event-handlers console_direct+ \
 		--merge-install \
 		--packages-ignore-regex=.*_cpp \
+		--packages-skip tracetools_read tracetools_trace tracetools_launch tracetools_test ros2trace \
 		--metas $(EXTENSIONS_DIR)/colcon.meta $(APP_COLCON_META) \
 		--cmake-args \
 		"--no-warn-unused-cli" \
+		-DCMAKE_TOOLCHAIN_FILE=$(EXTENSIONS_DIR)/esp32_toolchain.cmake \
+		-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+		-DCMAKE_VERBOSE_MAKEFILE=ON \
+		-DTRACETOOLS_DISABLED=ON \
 		-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=OFF \
 		-DTHIRDPARTY=ON \
 		-DBUILD_SHARED_LIBS=OFF \
 		-DBUILD_TESTING=OFF \
 		-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
-		-DCMAKE_TOOLCHAIN_FILE=$(EXTENSIONS_DIR)/esp32_toolchain.cmake \
-		-DCMAKE_VERBOSE_MAKEFILE=OFF \
-        -DIDF_INCLUDES='${IDF_INCLUDES}' \
-		-DCMAKE_C_STANDARD=$(C_STANDARD) \
-		-DUCLIENT_C_STANDARD=$(C_STANDARD);
+		-DIDF_INCLUDES:STRING="$(IDF_INCLUDES)" \
+		-DRMW_UXRCE_TRANSPORT=udp \
+		-DUCLIENT_PLATFORM=freertos \
+		-DUCLIENT_PROFILE_CUSTOM_TRANSPORT=OFF \
+		-DUCLIENT_PROFILE_POSIX_TRANSPORT=OFF \
+		-DUCLIENT_PROFILE_UDP_TRANSPORT=ON
 
 patch_atomic:$(EXTENSIONS_DIR)/micro_ros_src/install
 # Workaround https://github.com/micro-ROS/micro_ros_espidf_component/issues/18
@@ -159,4 +199,11 @@ $(EXTENSIONS_DIR)/libmicroros.a: $(EXTENSIONS_DIR)/micro_ros_src/install patch_a
 	done ; \
 	$(X_AR) rc -s libmicroros.a *.obj; cp libmicroros.a $(EXTENSIONS_DIR); \
 	cd ..; rm -rf libmicroros; \
-	cp -R $(UROS_DIR)/install/include $(EXTENSIONS_DIR)/include;
+	# libmicroros.mk  (inside the $(EXTENSIONS_DIR)/libmicroros.a rule)
+	mkdir -p $(EXTENSIONS_DIR)/include; \
+	if [ -d $(UROS_DIR)/install/include ] && [ "$$(ls -A $(UROS_DIR)/install/include 2>/dev/null)" ]; then \
+		cp -R $(UROS_DIR)/install/include/* $(EXTENSIONS_DIR)/include/; \
+	else \
+		echo "WARN: install/include empty; falling back to src headers"; \
+		find $(UROS_DIR)/src -maxdepth 3 -type d -name include -exec cp -R {}/\* $(EXTENSIONS_DIR)/include/ \; 2>/dev/null || true; \
+	fi

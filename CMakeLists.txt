@@ -12,7 +12,9 @@ if(BUILD_WLAN_INTERFACE)
 endif()
 
 idf_component_register(SRCS ${COMPONENT_SRC}
-                       INCLUDE_DIRS "network_interfaces"
+                       INCLUDE_DIRS
+                            "network_interfaces"
+                            "${COMPONENT_DIR}/include"
                        REQUIRES nvs_flash esp_wifi esp_eth lwip)
 
 if(CMAKE_GENERATOR STREQUAL "Unix Makefiles")
@@ -45,30 +47,58 @@ message(STATUS "Using Micro XRCE-DDS middleware")
 set(MIDDLEWARE "microxrcedds")
 endif()
 
-# Create a list of packages to get includes
+message(STATUS "IDF_PATH=${IDF_PATH}")
+message(STATUS "IDF_INCLUDES=${IDF_INCLUDES}")
+
+# Build a full include list from IDF components
+set(IDF_INCLUDES_ALL "")
 idf_build_get_property(PACKAGES BUILD_COMPONENTS)
 
-# Add includes for each package
 foreach(package ${PACKAGES})
-    idf_component_get_property(${package}_dir ${package} COMPONENT_DIR)
-    idf_component_get_property(${package}_includes ${package} INCLUDE_DIRS)
-    list(TRANSFORM ${package}_includes PREPEND " -I${${package}_dir}/")
-    string(REPLACE ";" "" ${package}_includes_string "${${package}_includes}")
+  idf_component_get_property(${package}_dir ${package} COMPONENT_DIR)
+  idf_component_get_property(${package}_includes ${package} INCLUDE_DIRS)
+
+  set(_incs "")
+  foreach(_inc ${${package}_includes})
+    if (IS_ABSOLUTE "${_inc}")
+      list(APPEND _incs " -I${_inc}")
+    else()
+      list(APPEND _incs " -I${${package}_dir}/${_inc}")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _incs)
+  string(REPLACE ";" "" ${package}_includes_string "${_incs}")
+  string(APPEND IDF_INCLUDES_ALL "${${package}_includes_string}")
 endforeach()
 
-# Workaround for https://github.com/ros2/rosidl/pull/739
-string(APPEND IDF_INCLUDES "-I${COMPONENT_DIR}/include_override")
+# rosidl workaround
+string(APPEND IDF_INCLUDES_ALL " -I${COMPONENT_DIR}/include_override")
 
-# Create a string with all packages with a for loop
-foreach(package ${PACKAGES})
-    string(APPEND IDF_INCLUDES "${${package}_includes_string}")
-endforeach()
+# Start from all includes
+set(IDF_INCLUDES_MICROROS "${IDF_INCLUDES_ALL}")
+
+# Strip Arduino from the micro-ROS include set (matches both .../arduino-esp32 and .../espressif__arduino-esp32)
+string(REGEX REPLACE " ?-I[^ ]*/(espressif__)?arduino-esp32[^ ]*" "" IDF_INCLUDES_MICROROS "${IDF_INCLUDES_MICROROS}")
+
+# (optional) quiet newlib warnings; keeps behavior the same
+string(REPLACE "-I${IDF_PATH}/components/newlib/platform_include"
+               "-isystem ${IDF_PATH}/components/newlib/platform_include"
+               IDF_INCLUDES_MICROROS "${IDF_INCLUDES_MICROROS}")
+string(REPLACE "-I${IDF_PATH}/components/newlib/include"
+               "-isystem ${IDF_PATH}/components/newlib/include"
+               IDF_INCLUDES_MICROROS "${IDF_INCLUDES_MICROROS}")
+
+# Rosidl workaround still applies
+string(APPEND IDF_INCLUDES_MICROROS " -I${COMPONENT_DIR}/include_override")
+
+# Write only the **filtered** set for the inner build
+file(WRITE ${CMAKE_BINARY_DIR}/idf_includes.txt "${IDF_INCLUDES_MICROROS}\n")
 
 execute_process(
     WORKING_DIRECTORY ${COMPONENT_DIR}
     RESULT_VARIABLE libmicroros_ret
     COMMAND
-        ${submake} -j -f libmicroros.mk
+        ${submake} -j1 -f libmicroros.mk
                 X_CC=${CMAKE_C_COMPILER}
                 X_AR=${CMAKE_AR}
                 X_STRIP=${CMAKE_STRIP}
@@ -78,7 +108,7 @@ execute_process(
                 C_STANDARD=${CMAKE_C_STANDARD}
                 MIDDLEWARE=${MIDDLEWARE}
                 BUILD_DIR=${CMAKE_BINARY_DIR}
-                IDF_INCLUDES=${IDF_INCLUDES}
+                IDF_INCLUDES_FILE=${CMAKE_BINARY_DIR}/idf_includes.txt
                 IDF_PATH=${IDF_PATH}
                 IDF_TARGET=${IDF_TARGET}
                 APP_COLCON_META=${APP_COLCON_META}
