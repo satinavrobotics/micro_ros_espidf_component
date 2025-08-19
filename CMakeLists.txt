@@ -15,7 +15,7 @@ idf_component_register(SRCS ${COMPONENT_SRC}
                        INCLUDE_DIRS
                             "network_interfaces"
                             "${COMPONENT_DIR}/include"
-                       REQUIRES nvs_flash esp_wifi esp_eth lwip)
+                       REQUIRES nvs_flash esp_wifi esp_eth lwip driver)
 
 if(CMAKE_GENERATOR STREQUAL "Unix Makefiles")
 set(submake "make")

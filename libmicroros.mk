@@ -171,7 +171,7 @@ ifeq ($(IDF_TARGET),$(filter $(IDF_TARGET),esp32s2 esp32c3 esp32c6))
 		cd ..; \
 		rm -rf $(UROS_DIR)/atomic_workaround;
 endif
-ifeq ($(IDF_TARGET),$(filter $(IDF_TARGET),esp32))
+ifeq ($(IDF_TARGET),$(filter $(IDF_TARGET),esp32 esp32s3))
 		echo $(UROS_DIR)/atomic_workaround; \
 		mkdir $(UROS_DIR)/atomic_workaround; cd $(UROS_DIR)/atomic_workaround; \
 		$(X_AR) x $(UROS_DIR)/install/lib/librcutils.a; \
