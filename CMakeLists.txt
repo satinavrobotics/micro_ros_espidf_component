@@ -11,6 +11,9 @@ if(BUILD_WLAN_INTERFACE)
     list(APPEND COMPONENT_SRC "network_interfaces/uros_wlan_netif.c")
 endif()
 
+# Ensure include directory exists even on a fresh clean before inner build populates it
+file(MAKE_DIRECTORY "${COMPONENT_DIR}/include")
+
 idf_component_register(SRCS ${COMPONENT_SRC}
                        INCLUDE_DIRS
                             "network_interfaces"
