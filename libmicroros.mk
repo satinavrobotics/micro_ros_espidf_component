@@ -130,7 +130,7 @@ $(EXTENSIONS_DIR)/micro_ros_src/install: $(EXTENSIONS_DIR)/esp32_toolchain.cmake
 	unset CC; unset CXX; \
 	colcon build \
 		--executor sequential \
-		--parallel-workers 2 \
+		--parallel-workers 4 \
 		--event-handlers console_direct+ \
 		--merge-install \
 		--packages-ignore-regex=.*_cpp \
