@@ -13,7 +13,7 @@ endif()
 
 idf_component_register(SRCS ${COMPONENT_SRC}
                        INCLUDE_DIRS "network_interfaces"
-                       REQUIRES nvs_flash esp_wifi esp_eth lwip)
+                       REQUIRES driver nvs_flash esp_wifi esp_eth lwip)
 
 if(CMAKE_GENERATOR STREQUAL "Unix Makefiles")
 set(submake "make")

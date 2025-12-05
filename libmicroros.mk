@@ -13,6 +13,26 @@ endif
 CFLAGS_INTERNAL := $(X_CFLAGS) -ffunction-sections -fdata-sections
 CXXFLAGS_INTERNAL := $(X_CXXFLAGS) -ffunction-sections -fdata-sections
 
+# Allow passing includes via file (avoids broken quoting)
+ifneq ($(strip $(IDF_INCLUDES_FILE)),)
+IDF_INCLUDES := $(shell cat $(IDF_INCLUDES_FILE))
+endif
+
+# --- macOS/arm64 host colcon settings (fixes libc++/ABI link errors) ---
+ifeq ($(shell uname),Darwin)
+COLCON_HOST_ARGS := --merge-install \
+  --cmake-args -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF \
+               -DCMAKE_OSX_ARCHITECTURES=arm64 \
+               -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+               -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+               -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
+               -DCMAKE_SHARED_LINKER_FLAGS="-stdlib=libc++" \
+               -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"
+else
+COLCON_HOST_ARGS := --merge-install --cmake-args -DBUILD_TESTING=OFF
+endif
+# ----------------------------------------------------------------------
+
 all: $(EXTENSIONS_DIR)/libmicroros.a
 
 clean:
@@ -43,7 +63,8 @@ $(EXTENSIONS_DIR)/micro_ros_dev/install:
 	git clone -b jazzy https://github.com/ament/googletest src/googletest; \
 	git clone -b jazzy https://github.com/ros2/ament_cmake_ros src/ament_cmake_ros; \
 	git clone -b jazzy https://github.com/ament/ament_index src/ament_index; \
-	colcon build --cmake-args -DBUILD_TESTING=OFF -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=gcc;
+	touch src/ament_index/ament_index_cpp/COLCON_IGNORE; \
+	CC=clang CXX=clang++ colcon build $(COLCON_HOST_ARGS) --packages-skip ament_index_cpp;
 
 $(EXTENSIONS_DIR)/micro_ros_src/src:
 	rm -rf micro_ros_src; \
@@ -74,6 +95,15 @@ $(EXTENSIONS_DIR)/micro_ros_src/src:
 	git clone -b jazzy https://github.com/ros2/rmw_implementation src/rmw_implementation; \
 	git clone -b jazzy https://github.com/ros2/rcl_logging src/rcl_logging; \
 	git clone -b jazzy https://github.com/ros2/ros2_tracing src/ros2_tracing; \
+	touch src/ros2_tracing/tracetools_read/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/tracetools_trace/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/tracetools_launch/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/tracetools_test/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/ros2trace/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/test_tracetools/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/lttngpy/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/test_ros2trace/COLCON_IGNORE || true; \
+	touch src/ros2_tracing/test_tracetools_launch/COLCON_IGNORE || true; \
 	git clone -b jazzy https://github.com/micro-ROS/micro_ros_utilities src/micro_ros_utilities; \
 	git clone -b jazzy https://github.com/ros2/rosidl_core src/rosidl_core; \
     touch src/rosidl/rosidl_typesupport_introspection_cpp/COLCON_IGNORE; \
@@ -81,8 +111,6 @@ $(EXTENSIONS_DIR)/micro_ros_src/src:
     touch src/rcl_logging/rcl_logging_spdlog/COLCON_IGNORE; \
     touch src/rclc/rclc_examples/COLCON_IGNORE; \
 	touch src/rcl/rcl_yaml_param_parser/COLCON_IGNORE; \
-	touch src/ros2_tracing/test_tracetools/COLCON_IGNORE; \
-	touch src/ros2_tracing/lttngpy/COLCON_IGNORE; \
 	cp -rf $(EXTRA_ROS_PACKAGES) src/extra_packages || :; \
 	test -f src/extra_packages/extra_packages.repos && cd src/extra_packages && vcs import --input extra_packages.repos || :;
 
@@ -94,10 +122,13 @@ $(EXTENSIONS_DIR)/micro_ros_src/install: $(EXTENSIONS_DIR)/esp32_toolchain.cmake
 	. ../micro_ros_dev/install/local_setup.sh; \
 	colcon build \
 		--merge-install \
+		--executor sequential \
+		--event-handlers console_direct+ \
 		--packages-ignore-regex=.*_cpp \
 		--metas $(EXTENSIONS_DIR)/colcon.meta $(APP_COLCON_META) \
 		--cmake-args \
 		"--no-warn-unused-cli" \
+		-GNinja \
 		-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=OFF \
 		-DTHIRDPARTY=ON \
 		-DBUILD_SHARED_LIBS=OFF \
@@ -135,7 +166,7 @@ ifeq ($(IDF_TARGET),$(filter $(IDF_TARGET),esp32s2 esp32c3 esp32c6))
 		cd ..; \
 		rm -rf $(UROS_DIR)/atomic_workaround;
 endif
-ifeq ($(IDF_TARGET),$(filter $(IDF_TARGET),esp32))
+ifeq ($(IDF_TARGET),$(filter $(IDF_TARGET),esp32 esp32s3))
 		echo $(UROS_DIR)/atomic_workaround; \
 		mkdir $(UROS_DIR)/atomic_workaround; cd $(UROS_DIR)/atomic_workaround; \
 		$(X_AR) x $(UROS_DIR)/install/lib/librcutils.a; \
