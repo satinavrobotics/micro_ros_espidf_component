@@ -8,6 +8,8 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "sdkconfig.h"
+#include "lwip/inet.h"
+#include "lwip/ip4_addr.h"
 #if CONFIG_ETH_USE_SPI_ETHERNET
 #include "driver/spi_master.h"
 #endif
@@ -74,9 +76,8 @@ esp_err_t uros_network_interface_initialize(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
     esp_netif_t *eth_netif = esp_netif_new(&cfg);
-    // Set default handlers to process TCP/IP stuffs
-    ESP_ERROR_CHECK(esp_eth_set_default_handlers(eth_netif));
     // Register user defined event handers
+    // Note: esp_eth_set_default_handlers() was removed in ESP-IDF 5.x, event handlers are registered directly
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &eth_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &got_ip_event_handler, NULL));
 
@@ -109,7 +110,8 @@ esp_err_t uros_network_interface_initialize(void)
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(CONFIG_MICRO_ROS_ETH_SPI_HOST, &buscfg, 1));
+    // ESP-IDF 5.x: Use SPI_DMA_CH_AUTO for automatic DMA channel allocation on ESP32-S3
+    ESP_ERROR_CHECK(spi_bus_initialize(CONFIG_MICRO_ROS_ETH_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
 #if CONFIG_MICRO_ROS_USE_DM9051
     spi_device_interface_config_t devcfg = {
         .command_bits = 1,
@@ -136,7 +138,8 @@ esp_err_t uros_network_interface_initialize(void)
     };
     ESP_ERROR_CHECK(spi_bus_add_device(CONFIG_MICRO_ROS_ETH_SPI_HOST, &devcfg, &spi_handle));
     /* w5500 ethernet driver is based on spi driver */
-    eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(spi_handle);
+    // ESP-IDF 5.x: ETH_W5500_DEFAULT_CONFIG now requires both spi_host AND spi_devcfg
+    eth_w5500_config_t w5500_config = ETH_W5500_DEFAULT_CONFIG(CONFIG_MICRO_ROS_ETH_SPI_HOST, &devcfg);
     w5500_config.int_gpio_num = CONFIG_MICRO_ROS_ETH_SPI_INT_GPIO;
     esp_eth_mac_t *mac = esp_eth_mac_new_w5500(&w5500_config, &mac_config);
     esp_eth_phy_t *phy = esp_eth_phy_new_w5500(&phy_config);
@@ -155,6 +158,18 @@ esp_err_t uros_network_interface_initialize(void)
 #endif
     /* attach Ethernet driver to TCP/IP stack */
     ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
+
+    /* --- Disable DHCP and set static IP --- */
+    ESP_ERROR_CHECK(esp_netif_dhcpc_stop(eth_netif));
+
+    esp_netif_ip_info_t ip = {};
+    esp_netif_set_ip4_addr(&ip.ip,      192, 168, 50, 2);
+    esp_netif_set_ip4_addr(&ip.gw,      192, 168, 50, 1);
+    esp_netif_set_ip4_addr(&ip.netmask, 255, 255, 255, 0);
+
+    ESP_ERROR_CHECK(esp_netif_set_ip_info(eth_netif, &ip));
+    ESP_LOGI(TAG, "Static IP configured: " IPSTR, IP2STR(&ip.ip));
+
     /* start Ethernet driver state machine */
     ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 
