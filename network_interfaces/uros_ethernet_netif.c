@@ -100,7 +100,7 @@ esp_err_t uros_network_interface_initialize(void)
     esp_eth_phy_t *phy = esp_eth_phy_new_ksz8041(&phy_config);
 #endif
 #elif CONFIG_ETH_USE_SPI_ETHERNET
-    gpio_install_isr_service(0);
+    // gpio_install_isr_service(0); // call in main
     spi_device_handle_t spi_handle = NULL;
     spi_bus_config_t buscfg = {
         .miso_io_num = CONFIG_MICRO_ROS_ETH_SPI_MISO_GPIO,
