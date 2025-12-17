@@ -64,7 +64,11 @@ $(EXTENSIONS_DIR)/micro_ros_dev/install:
 	git clone -b humble https://github.com/ros2/ament_cmake_ros src/ament_cmake_ros; \
 	git clone -b humble https://github.com/ament/ament_index src/ament_index; \
 	touch src/ament_index/ament_index_cpp/COLCON_IGNORE; \
-	CC=clang CXX=clang++ colcon build $(COLCON_HOST_ARGS) --packages-skip ament_index_cpp;
+	if [ "$$(uname)" = "Darwin" ]; then \
+		CC=clang CXX=clang++ colcon build $(COLCON_HOST_ARGS) --packages-skip ament_index_cpp; \
+	else \
+		colcon build $(COLCON_HOST_ARGS) --packages-skip ament_index_cpp; \
+	fi;
 
 $(EXTENSIONS_DIR)/micro_ros_src/src:
 	rm -rf $(UROS_DIR); \
